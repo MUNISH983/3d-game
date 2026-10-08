@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Haunted Survival</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{box-sizing:border-box;--fg:#fff;--panel:rgba(20,10,10,.78)}
+html,body{height:100%;margin:0;background:#2a1220;overflow:hidden;font-family:system-ui,sans-serif;color:var(--fg)}
+canvas{display:block}
+#hud{position:fixed;top:0;left:0;right:0;padding:calc(12px + env(safe-area-inset-top,0px)) 16px 0;display:flex;justify-content:space-between;font-size:22px;pointer-events:none;text-shadow:0 1px 3px #000}
+#cross{position:fixed;left:50%;top:50%;width:14px;height:14px;margin:-7px;border:2px solid #fff8;border-radius:50%;pointer-events:none}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--panel);text-align:center;padding:24px}
+#msg h1{margin:0 0 8px;font-size:40px}
+#msg p{margin:4px 0;max-width:420px;line-height:1.5}
+#msg button{margin-top:18px;padding:12px 28px;font-size:18px;border:0;border-radius:8px;background:#ff7a3c;color:#fff;cursor:pointer}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="hud"><div id="hearts"></div><div id="info"></div></div>
+<div id="cross"></div>
+<div id="msg"><h1 id="title">Haunted Survival</h1>
+<p id="sub">Kill both zombies before they get you. Zombies have 3 HP; you have 5 hearts and 12 bullets.</p>
+<p>WASD move · Mouse aim · Click shoot · SPACE jump · M mute</p>
+<button id="btn">Play</button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const W=100,H=W/2;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.prepend(renderer.domElement);
+const scene=new THREE.Scene();
+const sc=document.createElement('canvas');sc.width=2;sc.height=256;
+const sx=sc.getContext('2d'),sg=sx.createLinearGradient(0,0,0,256);
+sg.addColorStop(0,'#0d0620');sg.addColorStop(.5,'#4a1238');sg.addColorStop(.8,'#a8283a');sg.addColorStop(1,'#ff6a2a');
+sx.fillStyle=sg;sx.fillRect(0,0,2,256);
+scene.background=new THREE.CanvasTexture(sc);scene.fog=new THREE.Fog(0x3a1030,10,70);
+const cam=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,200);
+scene.add(cam);
+scene.add(new THREE.HemisphereLight(0x9a6ab0,0x1a0c18,.8));
+const sun=new THREE.DirectionalLight(0xff5a30,1.1);sun.position.set(-40,25,-30);scene.add(sun);
+const sunBall=new THREE.Mesh(new THREE.SphereGeometry(10,24,24),new THREE.MeshBasicMaterial({color:0xff4a20,fog:false}));
+sunBall.position.set(-90,6,-80);scene.add(sunBall);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(W,W),new THREE.MeshLambertMaterial({color:0x2e2832}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+
+// obstacles
+const obs=[];
+function rnd(a,b){return a+Math.random()*(b-a)}
+for(let i=0;i<70;i++){
+  let x,z;do{x=rnd(-H+3,H-3);z=rnd(-H+3,H-3)}while(Math.hypot(x,z)<8||Math.hypot(x,z+28)<11);
+  const g=new THREE.Group();let r;
+  if(i%3){ // tree
+    const t=new THREE.Mesh(new THREE.CylinderGeometry(.3,.4,3),new THREE.MeshLambertMaterial({color:0x241510}));t.position.y=1.5;
+    const c=new THREE.Mesh(new THREE.ConeGeometry(1.8,4.5,8),new THREE.MeshLambertMaterial({color:0x14201a}));c.position.y=5;
+    g.add(t,c);r=.8;
+  }else{ // rock
+    const s=rnd(1,2.2);
+    const m=new THREE.Mesh(new THREE.DodecahedronGeometry(s),new THREE.MeshLambertMaterial({color:0x4a4654}));m.position.y=s*.6;
+    g.add(m);r=s;
+  }
+  g.position.set(x,0,z);scene.add(g);obs.push({x,z,r});
+}
+function push(p,rad){
+  for(const o of obs){const dx=p.x-o.x,dz=p.z-o.z,d=Math.hypot(dx,dz),m=o.r+rad;
+    if(d<m&&d>0){p.x=o.x+dx/d*m;p.z=o.z+dz/d*m}}
+  p.x=Math.max(-H+1,Math.min(H-1,p.x));p.z=Math.max(-H+1,Math.min(H-1,p.z));
+}
+
+// haunted house
+const hh=new THREE.Group();
+const M=(c)=>new THREE.MeshLambertMaterial({color:c}),B=(w,h,d,m)=>new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);
+const wall=M(0x3b3340),rm=M(0x1a1018);
+const add=(m,x,y,z,g=hh)=>{m.position.set(x,y,z);g.add(m);return m};
+add(B(10,.3,8,wall),0,6.15,0);add(B(9.4,.05,7.4,M(0x2a1c14)),0,.03,0);
+add(B(10,6,.4,wall),0,3,-3.8);add(B(.4,6,8,wall),-4.8,3,0);add(B(.4,6,8,wall),4.8,3,0);
+add(B(4,6,.4,wall),-3,3,3.8);add(B(4,6,.4,wall),3,3,3.8);add(B(2,2.8,.4,wall),0,4.6,3.8);
+const roof=new THREE.Mesh(new THREE.ConeGeometry(8,4,4),rm);roof.rotation.y=Math.PI/4;add(roof,0,8,0);
+add(B(2.5,10,2.5,wall),6.5,5,-2);
+const troof=new THREE.Mesh(new THREE.ConeGeometry(2.2,3,4),rm);troof.rotation.y=Math.PI/4;add(troof,6.5,11.5,-2);
+const glow=new THREE.MeshBasicMaterial({color:0xb6ff6a});
+[-3,3].forEach(x=>add(B(1.2,1.5,.2,glow),x,3.5,4.05));add(B(.8,1.2,.2,glow),6.5,8,-.65);
+// door (hinged, opens when you get close)
+const doorP=new THREE.Group();doorP.position.set(-1,0,3.9);hh.add(doorP);add(B(2,3.1,.12,M(0x120a08)),1,1.55,0,doorP);
+const dObs=[{x:-.55,z:-24.1,r:.5},{x:.55,z:-24.1,r:.5}];dObs.forEach(o=>obs.push(o));
+// walls collision
+const wc=(x,z)=>obs.push({x,z:z-28,r:.35});
+for(let x=-5;x<=5;x+=.6){wc(x,-3.8);if(Math.abs(x)>1.3)wc(x,3.8)}
+for(let z=-3.8;z<=3.8;z+=.6){wc(-4.8,z);wc(4.8,z)}
+obs.push({x:6.5,z:-30,r:1.8});
+const il=new THREE.PointLight(0xa070ff,1,16);il.position.set(0,4.5,0);hh.add(il);
+// broken TV
+const tc=document.createElement('canvas');tc.width=tc.height=48;const tx=tc.getContext('2d'),tvTex=new THREE.CanvasTexture(tc);tvTex.magFilter=THREE.NearestFilter;
+function tvDraw(){const im=tx.createImageData(48,48);for(let i=0;i<im.data.length;i+=4){const v=Math.random()*200|0;im.data[i]=v*.8;im.data[i+1]=v;im.data[i+2]=v*1.1;im.data[i+3]=255}
+ tx.putImageData(im,0,0);tx.strokeStyle='#000';tx.lineWidth=1.5;tx.beginPath();tx.moveTo(30,0);tx.lineTo(22,18);tx.lineTo(34,30);tx.lineTo(20,48);tx.moveTo(22,18);tx.lineTo(4,24);tx.stroke();tvTex.needsUpdate=true}
+tvDraw();
+add(B(1.4,1,1,M(0x3a2a1c)),-3.2,.5,-2.8);
+const tv=new THREE.Group();tv.position.set(-3.2,1.5,-2.8);tv.rotation.set(0,.3,.12);hh.add(tv);
+add(B(1.2,.9,.8,M(0x1c1c20)),0,0,0,tv);
+add(new THREE.Mesh(new THREE.PlaneGeometry(.9,.65),new THREE.MeshBasicMaterial({map:tvTex})),0,0,.41,tv);
+[-.2,.2].forEach(x=>{const an=new THREE.Mesh(new THREE.CylinderGeometry(.015,.015,.8),M(0x999999));an.rotation.z=-x*3;add(an,x,.8,0,tv)});
+const tvL=new THREE.PointLight(0x66aaff,0,8);tvL.position.set(-3,1.6,-1.8);hh.add(tvL);
+// broken mirror
+const mc=document.createElement('canvas');mc.width=96;mc.height=144;const mx=mc.getContext('2d');
+const gr=mx.createLinearGradient(0,0,96,144);gr.addColorStop(0,'#9fb4c8');gr.addColorStop(.5,'#d8e4ee');gr.addColorStop(1,'#6a7f94');mx.fillStyle=gr;mx.fillRect(0,0,96,144);
+mx.clearRect(60,0,36,40);mx.clearRect(0,100,30,44);mx.strokeStyle='#223';mx.beginPath();
+for(let a=0;a<9;a++){const t=a*.7;mx.moveTo(48,70);mx.lineTo(48+Math.cos(t)*70,70+Math.sin(t)*90)}mx.stroke();
+add(B(1.5,2.3,.12,M(0x2a1a10)),2.2,2.2,-3.55);
+add(new THREE.Mesh(new THREE.PlaneGeometry(1.3,2.1),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(mc),transparent:true,side:THREE.DoubleSide})),2.2,2.2,-3.47);
+for(let i=0;i<6;i++){const sh=new THREE.Mesh(new THREE.ConeGeometry(.1,.25,3),new THREE.MeshBasicMaterial({color:0xbcd0e0}));sh.rotation.set(Math.PI/2,0,rnd(0,6));add(sh,rnd(1,3.2),.05,rnd(-3,-2),hh)}
+// haunted doll on a chair
+add(B(.8,.08,.8,M(0x2a1a10)),2.8,.6,-1.8);add(B(.8,.9,.08,M(0x2a1a10)),2.8,1.05,-2.2);
+[[-.35,-.35],[.35,-.35],[-.35,.35],[.35,.35]].forEach(l=>add(B(.07,.6,.07,M(0x2a1a10)),2.8+l[0],.3,-1.8+l[1]));
+const doll=new THREE.Group();doll.position.set(2.8,.65,-1.8);hh.add(doll);
+add(new THREE.Mesh(new THREE.ConeGeometry(.28,.5,10),M(0xcfc6bc)),0,.25,0,doll);
+[-.2,.2].forEach(x=>{const ar=B(.06,.3,.06,M(0xe6d6c8));ar.rotation.x=-.9;add(ar,x,.4,.15,doll)});
+const dollHead=new THREE.Group();dollHead.position.y=.72;doll.add(dollHead);
+add(new THREE.Mesh(new THREE.SphereGeometry(.2,14,10),M(0xe6d6c8)),0,0,0,dollHead);
+const hair=new THREE.Mesh(new THREE.SphereGeometry(.215,12,8),M(0x1a0f0a));hair.scale.set(1,.8,1);add(hair,0,.05,-.03,dollHead);
+const eyeM=new THREE.MeshBasicMaterial({color:0x000000});
+[-.07,.07].forEach(x=>add(new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),eyeM),x,0,.18,dollHead));
+dollHead.rotation.z=.15;
+// dead cat (stylized, X eyes)
+const cat=new THREE.Group();cat.position.set(-1.2,0,1.6);cat.rotation.y=.5;hh.add(cat);
+const cm=M(0x0e0e12),bd=new THREE.Mesh(new THREE.SphereGeometry(.25,12,8),cm);bd.scale.set(1.8,.7,.8);add(bd,0,.18,0,cat);
+add(new THREE.Mesh(new THREE.SphereGeometry(.15,10,8),cm),.5,.15,.05,cat);
+[-.08,.08].forEach(z=>add(new THREE.Mesh(new THREE.ConeGeometry(.06,.12,4),cm),.52,.3,z+.05,cat));
+const tl=new THREE.Mesh(new THREE.CylinderGeometry(.025,.02,.5),cm);tl.rotation.set(0,.5,Math.PI/2);add(tl,-.6,.08,.15,cat);
+[[.2,.3],[-.2,.3],[.25,-.28],[-.2,-.28]].forEach(l=>{const lg=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.3),cm);lg.rotation.x=Math.PI/2;add(lg,l[0],.2,l[1]*1.1,cat)});
+const wm=new THREE.MeshBasicMaterial({color:0xffffff});
+[.06,-.06].forEach(z=>[.78,-.78].forEach(r=>{const xb=B(.01,.08,.015,wm);xb.rotation.x=r;add(xb,.64,.2,z+.05,cat)}));
+hh.position.set(0,0,-28);scene.add(hh);
+const hl=new THREE.PointLight(0x9cff5a,1.5,30);hl.position.set(0,4,-22);scene.add(hl);
+for(let i=0;i<8;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(.8,1.2,.2),new THREE.MeshLambertMaterial({color:0x66606e}));t.position.set(rnd(-10,10),.6,rnd(-20,-14));t.rotation.y=rnd(-.4,.4);scene.add(t)}
+
+let doorOpen=false,tvT=0,dollT=3;
+function creak(){tone('sawtooth',180,420,1.3,.22);tone('square',150,260,1.3,.1)}
+function houseUpdate(dt){
+ if(!doorOpen&&running&&Math.hypot(pos.x,pos.z+24)<7){doorOpen=true;dObs.forEach(o=>{const i=obs.indexOf(o);if(i>=0)obs.splice(i,1)});creak()}
+ doorP.rotation.y+=((doorOpen?-1.9:0)-doorP.rotation.y)*Math.min(1,dt*2.5);
+ if(Math.hypot(pos.x+3.2,pos.z+30.8)<10){tvT-=dt;if(tvT<=0){tvT=.08+Math.random()*.12;tvDraw();tvL.intensity=Math.random()<.2?0:1.2;if(Math.random()<.08)noise(.15,.2,3000)}}else tvL.intensity=0;
+ const dd=Math.hypot(pos.x-2.8,pos.z+29.8),near=dd<7;
+ dollHead.rotation.y=Math.atan2(pos.x-2.8,pos.z+29.8);eyeM.color.set(near?0xff2020:0x000000);
+ if(running&&near&&(dollT-=dt)<=0){dollT=4+Math.random()*3;[0,.15,.3].forEach((d,i)=>tone('sine',900+i*150,1300+i*150,.12,.15,d))}
+ il.intensity=.9+Math.random()*.3;
+}
+// gun
+const gun=new THREE.Group();
+const gm=new THREE.MeshLambertMaterial({color:0x222222});
+const barrel=new THREE.Mesh(new THREE.BoxGeometry(.08,.08,.5),gm);barrel.position.z=-.25;
+const grip=new THREE.Mesh(new THREE.BoxGeometry(.09,.2,.1),gm);grip.position.set(0,-.12,0);
+gun.add(barrel,grip);gun.position.set(.3,-.25,-.5);cam.add(gun);
+const flash=new THREE.PointLight(0xffcc66,0,6);flash.position.set(.3,-.2,-1);cam.add(flash);
+
+// zombies
+const zombies=[];
+function makeZombie(x,z){
+  const g=new THREE.Group();
+  const skin=new THREE.MeshLambertMaterial({color:0x5f8f4a}),cloth=new THREE.MeshLambertMaterial({color:0x3a3a5a});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.8,1.1,.4),cloth);body.position.y=1.35;
+  const head=new THREE.Mesh(new THREE.BoxGeometry(.5,.5,.5),skin);head.position.y=2.15;
+  const legs=new THREE.Mesh(new THREE.BoxGeometry(.7,.8,.35),cloth);legs.position.y=.4;
+  const a1=new THREE.Mesh(new THREE.BoxGeometry(.2,.2,.9),skin),a2=a1.clone();
+  a1.position.set(-.5,1.6,.4);a2.position.set(.5,1.6,.4);
+  g.add(body,head,legs,a1,a2);g.position.set(x,0,z);scene.add(g);
+  const z_={g,hp:3,cd:0,gt:rnd(1,3),mats:[skin,cloth]};zombies.push(z_);
+}
+
+// audio (synthesized, no files)
+let AC,master,nb,muted=false;
+function initAudio(){
+  if(AC){AC.resume();return}
+  AC=new (window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain();master.gain.value=.6;master.connect(AC.destination);
+  nb=AC.createBuffer(1,AC.sampleRate*2,AC.sampleRate);
+  const d=nb.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+  const n=AC.createBufferSource();n.buffer=nb;n.loop=true;
+  const f=AC.createBiquadFilter();f.type='bandpass';f.frequency.value=400;f.Q.value=.8;
+  const g=AC.createGain();g.gain.value=.12;
+  const l=AC.createOscillator(),lg=AC.createGain();l.frequency.value=.15;lg.gain.value=250;l.connect(lg);lg.connect(f.frequency);l.start();
+  n.connect(f);f.connect(g);g.connect(master);n.start();
+  [55,82.4].forEach(fr=>{const o=AC.createOscillator();o.type='sawtooth';o.frequency.value=fr;
+    const lp=AC.createBiquadFilter();lp.frequency.value=180;const og=AC.createGain();og.gain.value=.03;
+    o.connect(lp);lp.connect(og);og.connect(master);o.start()});
+}
+function tone(type,f1,f2,dur,vol,delay=0){
+  if(!AC)return;const t=AC.currentTime+delay,o=AC.createOscillator(),g=AC.createGain();
+  o.type=type;o.frequency.setValueAtTime(f1,t);o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+  g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+  o.connect(g);g.connect(master);o.start(t);o.stop(t+dur);
+}
+function noise(dur,vol,freq){
+  if(!AC)return;const t=AC.currentTime,s=AC.createBufferSource();s.buffer=nb;
+  const f=AC.createBiquadFilter();f.type='lowpass';f.frequency.value=freq;
+  const g=AC.createGain();g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+  s.connect(f);f.connect(g);g.connect(master);s.start(t,Math.random());s.stop(t+dur);
+}
+function groan(d){const v=Math.max(.03,.35-d*.012);tone('sawtooth',100+Math.random()*30,55,1,v);tone('square',70,40,1,v*.5)}
+function owl(){tone('sine',420,380,.5,.08);tone('sine',420,360,.6,.08,.7)}
+let owlT=8;
+
+// state
+let hp,ammo,keys={},yaw,pitch,vy,onGround,running=false,over=false,pos=new THREE.Vector3();
+const hearts=document.getElementById('hearts'),info=document.getElementById('info');
+function hud(){hearts.textContent='❤'.repeat(hp)+'🖤'.repeat(5-hp);
+  info.textContent='🔫 '+ammo+'/12   🧟 '+zombies.filter(z=>z.hp>0).length+' left'}
+function start(){
+  zombies.forEach(z=>scene.remove(z.g));zombies.length=0;
+  makeZombie(25,25);makeZombie(-25,30);
+  hp=5;ammo=12;yaw=0;pitch=0;vy=0;onGround=true;over=false;pos.set(0,1.6,0);hud();
+  doorOpen=false;doorP.rotation.y=0;dObs.forEach(o=>{if(!obs.includes(o))obs.push(o)});initAudio();document.getElementById('msg').classList.add('hidden');running=true;
+  renderer.domElement.requestPointerLock&&renderer.domElement.requestPointerLock();
+}
+function end(win){
+  over=true;running=false;
+  win?[523,659,784,1047].forEach((f,i)=>tone('triangle',f,f,.4,.3,i*.18)):[300,250,200,120].forEach((f,i)=>tone('sawtooth',f,f*.8,.5,.25,i*.25));
+  document.exitPointerLock&&document.exitPointerLock();
+  document.getElementById('title').textContent=win?'You Win! 🎉':'Game Over 💀';
+  document.getElementById('sub').textContent=win?'Both zombies are dead.':'The zombies got you.';
+  document.getElementById('btn').textContent='Play again';
+  document.getElementById('msg').classList.remove('hidden');
+}
+document.getElementById('btn').onclick=start;
+addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyM'&&master){muted=!muted;master.gain.value=muted?0:.6}if(e.code==='Space')e.preventDefault()});
+addEventListener('keyup',e=>keys[e.code]=false);
+addEventListener('mousemove',e=>{
+  if(document.pointerLockElement!==renderer.domElement)return;
+  yaw-=e.movementX*.0022;pitch=Math.max(-1.4,Math.min(1.4,pitch-e.movementY*.0022));
+});
+const ray=new THREE.Raycaster();
+addEventListener('mousedown',()=>{
+  if(!running)return;
+  if(document.pointerLockElement!==renderer.domElement){renderer.domElement.requestPointerLock();return}
+  if(ammo<=0){tone('square',800,600,.04,.2);return}
+  noise(.3,.9,2200);tone('square',160,40,.25,.5);
+  ammo--;flash.intensity=3;setTimeout(()=>flash.intensity=0,60);
+  gun.position.z=-.4;setTimeout(()=>gun.position.z=-.5,70);
+  ray.setFromCamera(new THREE.Vector2(0,0),cam);
+  let best=null,bd=1e9;
+  for(const z of zombies){if(z.hp<=0)continue;
+    const h=ray.intersectObject(z.g,true)[0];if(h&&h.distance<bd){bd=h.distance;best=z}}
+  if(best){best.hp--;tone('sawtooth',220,60,.25,.4);if(best.hp<=0)tone('sawtooth',160,25,.9,.5);
+    best.mats[0].color.set(0xff3333);setTimeout(()=>best.mats[0].color.set(0x5f8f4a),120);
+    if(best.hp<=0)scene.remove(best.g);
+  }
+  hud();
+  if(zombies.every(z=>z.hp<=0))setTimeout(()=>end(true),400);
+});
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+
+const clock=new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt=Math.min(clock.getDelta(),.05);
+  if(running){
+    const f=(keys.KeyW?1:0)-(keys.KeyS?1:0),s=(keys.KeyD?1:0)-(keys.KeyA?1:0);
+    const sp=6*dt,sin=Math.sin(yaw),cos=Math.cos(yaw);
+    pos.x+=(-sin*f+cos*s)*sp;pos.z+=(-cos*f-sin*s)*sp;
+    if(keys.Space&&onGround){noise(.1,.2,900);vy=7;onGround=false}
+    vy-=20*dt;pos.y+=vy*dt;
+    if(pos.y<=1.6){pos.y=1.6;vy=0;onGround=true}
+    // jumping lets you hop over rocks/trees only if high enough
+    if(pos.y<3)push(pos,.4);else{pos.x=Math.max(-H+1,Math.min(H-1,pos.x));pos.z=Math.max(-H+1,Math.min(H-1,pos.z))}
+    for(const z of zombies){if(z.hp<=0)continue;
+      const dx=pos.x-z.g.position.x,dz=pos.z-z.g.position.z,d=Math.hypot(dx,dz);
+      z.g.rotation.y=Math.atan2(dx,dz);
+      if(d>1.5){z.g.position.x+=dx/d*2.4*dt;z.g.position.z+=dz/d*2.4*dt;push(z.g.position,.5)}
+      z.cd-=dt;z.gt-=dt;if(z.gt<=0){z.gt=3+Math.random()*3;groan(d)}
+      if(d<=1.7&&pos.y<2.6&&z.cd<=0){z.cd=1.2;hp--;hud();tone('sine',130,45,.35,.7);noise(.2,.5,600);
+        document.body.style.boxShadow='inset 0 0 120px 30px #f00';setTimeout(()=>document.body.style.boxShadow='',150);
+        if(hp<=0){end(false);break}}
+    }
+  }
+  houseUpdate(dt);
+  hl.intensity=1.2+Math.sin(performance.now()*.01)*.4+(Math.random()<.04?1:0);
+  if(running&&(owlT-=dt)<=0){owlT=8+Math.random()*10;owl()}
+  cam.position.copy(pos);cam.rotation.set(pitch,yaw,0,'YXZ');
+  renderer.render(scene,cam);
+}
+hud();loop();
+</script>
+</body>
+</html>
